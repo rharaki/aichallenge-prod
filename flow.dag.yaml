@@ -1,0 +1,108 @@
+id: bring_your_own_data_qna
+name: Bring Your Own Data QnA
+inputs:
+  question:
+    type: string
+    default: How to use SDK V2?
+    is_chat_input: false
+  image:
+    type: image
+    is_chat_input: false
+outputs:
+  output:
+    type: string
+    reference: ${answer_the_question_with_context_image.output}
+  context:
+    type: string
+    reference: ${generate_image_prompt_context.output}
+nodes:
+- name: image_lookup
+  type: python
+  source:
+    type: package
+    tool: promptflow_vectordb.tool.common_index_lookup.search
+  inputs:
+    mlindex_content: >
+      embeddings:
+        api_base: https://aichallenge-prod-pasona-ao.openai.azure.com/
+        api_type: azure
+        api_version: '2024-02-01'
+        batch_size: '1'
+        connection:
+          id: /subscriptions/4397bad8-31a5-42d2-be23-637c76979daf/resourceGroups/aichallenge-prod-pasona-rg/providers/Microsoft.MachineLearningServices/workspaces/aichallenge-prod-pasona-aml/connections/aichallenge-prod-pasona-gpt4
+        connection_type: workspace_connection
+        deployment: text-embedding-3-small
+        dimension: 1536
+        kind: open_ai
+        model: text-embedding-3-small
+        schema_version: '2'
+      index:
+        api_version: '2023-11-01'
+        connection:
+          id: /subscriptions/4397bad8-31a5-42d2-be23-637c76979daf/resourceGroups/aichallenge-prod-pasona-rg/providers/Microsoft.MachineLearningServices/workspaces/aichallenge-prod-pasona-aml/connections/aichallenge-prod-pasona-as
+        connection_type: workspace_connection
+        endpoint: https://aichallenge-prod-pasona-ss.search.windows.net
+        engine: azure-sdk
+        field_mapping:
+          content: chunk
+          embedding: text_vector
+          metadata: metadata_storage_path
+        index: aichallenge-prod-pasona-vector-image-preprocessed
+        kind: acs
+        semantic_configuration_name: aichallenge-prod-pasona-vector-image-preprocessed-semantic-configuration
+    queries: ${generate_image_context_withv.output}
+    query_type: Hybrid + semantic
+    top_k: 1
+  use_variants: false
+- name: generate_image_prompt_context
+  type: python
+  source:
+    type: code
+    path: generate_image_prompt_context.py
+  inputs:
+    search_result: ${image_lookup.output}
+  use_variants: false
+- name: prompt_variants_image
+  type: prompt
+  source:
+    type: code
+    path: prompt_variants_image.jinja2
+  inputs:
+    contexts: ${generate_image_prompt_context.output}
+    question: ${inputs.question}
+  use_variants: false
+- name: answer_the_question_with_context_image
+  type: llm
+  source:
+    type: code
+    path: answer_the_question_with_context_image.jinja2
+  inputs:
+    deployment_name: gpt-4o
+    temperature: 1
+    top_p: 1
+    prompt_text: ${prompt_variants_image.output}
+  provider: AzureOpenAI
+  connection: aichallenge-prod-pasona-gpt4
+  api: chat
+  module: promptflow.tools.aoai
+  use_variants: false
+- name: generate_image_context_withv
+  type: custom_llm
+  source:
+    type: package_with_prompt
+    path: generate_image_context_withv.jinja2
+    tool: promptflow.tools.aoai_gpt4v.AzureOpenAI.chat
+  inputs:
+    connection: aichallenge-prod-pasona-gpt4v
+    deployment_name: aichallenge-prod-pasona-pgt4v
+    temperature: 1
+    top_p: 1
+    max_tokens: 512
+    presence_penalty: 0
+    frequency_penalty: 0
+    detail: auto
+    image: ${inputs.image}
+  use_variants: false
+node_variants: {}
+environment:
+  python_requirements_txt: requirements.txt
